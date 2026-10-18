@@ -1,11 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Submission, CaseStatus } from '../types';
 import { EMOTIONS, TOPICS } from '../constants/emotions';
 import {
   exportSubmissionsToCsv,
   syncAllSubmissionsToGas,
+  syncSingleSubmissionToGas,
   getStoredGasUrl,
   setStoredGasUrl,
+  formatSafeDateTime,
+  formatSafeTimeOnly,
+  getVietnameseEmotion,
+  getVietnameseTopic,
+  getVietnameseSupport,
+  getVietnameseStatus,
+  safeString,
+  SAMPLE_GAS_CODE,
 } from '../services/storage';
 import {
   ShieldAlert,
@@ -19,12 +28,12 @@ import {
   FileText,
   Volume2,
   Image as ImageIcon,
+  Video,
   CheckCircle,
   Clock,
   MessageSquare,
   Lock,
   LogOut,
-  ChevronRight,
   Sparkles,
   ExternalLink,
   Code2,
@@ -33,7 +42,12 @@ import {
   X,
   Play,
   Pause,
+  AlertCircle,
+  CloudUpload,
+  CloudCheck,
+  KeyRound,
 } from 'lucide-react';
+import { ChangePasswordModal } from './ChangePasswordModal';
 
 interface TeacherDashboardProps {
   submissions: Submission[];
@@ -56,6 +70,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [filterTopic, setFilterTopic] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterUrgentOnly, setFilterUrgentOnly] = useState(false);
+  const [filterMediaType, setFilterMediaType] = useState<'all' | 'audio' | 'photo' | 'video'>('all');
 
   // New note form state
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -64,17 +79,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   // Audio player state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDurationTime, setAudioDurationTime] = useState(0);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
-  // Lightbox
-  const [viewingPhoto, setViewingPhoto] = useState<string | null>(null);
+  // Lightboxes
+  const [viewingPhoto, setViewingPhoto] = useState<{ url: string; title: string; fileId?: string } | null>(null);
+  const [viewingVideo, setViewingVideo] = useState<{ url: string; title: string; fileId?: string } | null>(null);
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [isSingleSyncing, setIsSingleSyncing] = useState(false);
   const [gasUrl, setGasUrl] = useState(getStoredGasUrl());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTestingGas, setIsTestingGas] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Statistics calculation
   const totalCount = submissions.length;
@@ -103,9 +125,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (filterEmotion !== 'all' && item.emotion !== filterEmotion) return false;
     if (filterTopic !== 'all' && item.topic !== filterTopic) return false;
     if (filterStatus !== 'all' && item.status !== filterStatus) return false;
+
+    if (filterMediaType === 'audio' && !item.audioBase64 && !item.audioBlobUrl && !item.audioDriveUrl) return false;
+    if (filterMediaType === 'photo' && !item.photoUrl && !item.photoBase64 && !item.photoDriveUrl) return false;
+    if (filterMediaType === 'video' && !item.videoBase64 && !item.videoBlobUrl && !item.videoDriveUrl) return false;
+
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
-      const matchName = item.studentName.toLowerCase().includes(q);
+      const matchName = (item.studentName || '').toLowerCase().includes(q);
       const matchClass = (item.studentClass || '').toLowerCase().includes(q);
       const matchText = (item.textMessage || '').toLowerCase().includes(q);
       if (!matchName && !matchClass && !matchText) return false;
@@ -115,20 +142,62 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const selectedCase = submissions.find((s) => s.id === selectedCaseId) || filteredList[0] || null;
 
+  useEffect(() => {
+    // Reset audio when case changes
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+    setPlayingAudioId(null);
+    setAudioCurrentTime(0);
+    setAudioDurationTime(0);
+  }, [selectedCaseId]);
+
   const handleTogglePlayAudio = (subId: string, audioSrc?: string) => {
-    if (!audioSrc) return;
-    if (playingAudioId === subId && audioElement) {
-      audioElement.pause();
-      setPlayingAudioId(null);
+    if (!audioSrc) {
+      alert('Không tìm thấy nguồn tệp âm thanh này.');
       return;
     }
-    if (audioElement) {
-      audioElement.pause();
+
+    if (playingAudioId === subId && audioPlayerRef.current) {
+      if (audioPlayerRef.current.paused) {
+        audioPlayerRef.current.play();
+      } else {
+        audioPlayerRef.current.pause();
+        setPlayingAudioId(null);
+      }
+      return;
     }
+
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+
     const audio = new Audio(audioSrc);
-    audio.onended = () => setPlayingAudioId(null);
-    audio.play();
-    setAudioElement(audio);
+    audioPlayerRef.current = audio;
+
+    audio.ontimeupdate = () => {
+      setAudioCurrentTime(audio.currentTime);
+      if (audio.duration && !isNaN(audio.duration)) {
+        setAudioDurationTime(audio.duration);
+      }
+    };
+
+    audio.onended = () => {
+      setPlayingAudioId(null);
+      setAudioCurrentTime(0);
+    };
+
+    audio.onerror = () => {
+      alert('Không thể phát tệp âm thanh trực tiếp. Thầy cô có thể bấm nút "Mở tệp Google Drive" hoặc "Tải tệp" để nghe nhé!');
+      setPlayingAudioId(null);
+    };
+
+    audio.play().catch((e) => {
+      console.warn('Playback error:', e);
+      alert('Trình duyệt cần tương tác để phát âm thanh. Vui lòng bấm lại nút Phát.');
+      setPlayingAudioId(null);
+    });
+
     setPlayingAudioId(subId);
   };
 
@@ -145,13 +214,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     alert('Đã cập nhật kế hoạch hỗ trợ cho học sinh!');
   };
 
-  const handleSyncNow = async () => {
+  const handleSyncAllNow = async () => {
     setIsSyncing(true);
-    setSyncFeedback('Đang đồng bộ dữ liệu lên Google Apps Script...');
+    setSyncFeedback('Đang đồng bộ toàn bộ lời nhắn và tải tệp lên Google Drive...');
     const res = await syncAllSubmissionsToGas();
     setIsSyncing(false);
-    setSyncFeedback(`Hoàn tất đồng bộ: ${res.success} mục thành công!`);
-    setTimeout(() => setSyncFeedback(null), 5000);
+    if (res.failed === 0) {
+      setSyncFeedback(`Đồng bộ thành công trọn vẹn ${res.success} mục lên Google Drive và Sheet!`);
+    } else {
+      setSyncFeedback(`Hoàn tất: ${res.success} thành công, ${res.failed} mục có lỗi (${res.errors.join('; ')})`);
+    }
+    setTimeout(() => setSyncFeedback(null), 6000);
+  };
+
+  const handleSyncSingleCase = async (item: Submission) => {
+    setIsSingleSyncing(true);
+    const res = await syncSingleSubmissionToGas(item);
+    setIsSingleSyncing(false);
+    if (res.success) {
+      alert('Đồng bộ tệp của học sinh lên Google Drive và Sheet thành công!');
+    } else {
+      alert(`Đồng bộ chưa thành công: ${res.message || 'Lỗi kết nối'}`);
+    }
   };
 
   const handleSaveGasUrl = () => {
@@ -159,269 +243,227 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     alert('Đã lưu cấu hình đường link Google Apps Script!');
   };
 
-  const gasSampleCode = `// Google Apps Script kết nối "Trạm Cảm Xúc Từ Trái Tim"
-// Dán toàn bộ mã này vào Extensions (Tiện ích mở rộng) > Apps Script trong Google Sheet của trường
-
-function doPost(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var data = JSON.parse(e.postData.contents);
-    
-    // 1. Chuẩn bị thư mục trên Google Drive để lưu tệp ghi âm và ảnh học sinh
-    var folderName = "Trạm Cảm Xúc - Tệp Đính Kèm";
-    var folders = DriveApp.getFoldersByName(folderName);
-    var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
-    // Cấp quyền xem cho người có link để giáo viên có thể nghe và xem
+  const handleTestGasConnection = async () => {
+    setIsTestingGas(true);
+    setTestResult(null);
     try {
-      folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    } catch (errShare) {}
-
-    // 2. Xử lý tệp Ghi Âm (nếu học sinh có gửi ghi âm)
-    var linkGhiAmDrive = "";
-    if (data.audioBase64 && data.audioBase64.length > 50) {
-      try {
-        var cleanAudio = data.audioBase64.replace(/^data:audio\\/[^;]+;base64,/, "");
-        var audioBytes = Utilities.base64Decode(cleanAudio);
-        var audioFileName = data.audioFileName || ("Ghi_Am_" + Utilities.formatDate(new Date(), "GMT+7", "yyyyMMdd_HHmmss") + ".webm");
-        var audioBlob = Utilities.newBlob(audioBytes, data.audioMimeType || "audio/webm", audioFileName);
-        var audioFile = folder.createFile(audioBlob);
-        audioFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        linkGhiAmDrive = audioFile.getUrl();
-      } catch (errAudio) {
-        linkGhiAmDrive = "Lỗi tạo file âm thanh: " + errAudio.toString();
-      }
+      const res = await fetch('/api/test-gas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gasUrl: gasUrl.trim() }),
+      });
+      const data = await res.json();
+      setTestResult(data);
+    } catch (err: any) {
+      setTestResult({ success: false, message: `Lỗi kết nối: ${err.message}` });
+    } finally {
+      setIsTestingGas(false);
     }
-
-    // 3. Xử lý tệp Hình Ảnh (nếu học sinh có gửi ảnh/chụp ảnh)
-    var linkHinhAnhDrive = "";
-    if (data.photoBase64 && data.photoBase64.length > 50) {
-      try {
-        var cleanPhoto = data.photoBase64.replace(/^data:image\\/[^;]+;base64,/, "");
-        var photoBytes = Utilities.base64Decode(cleanPhoto);
-        var photoFileName = data.photoFileName || ("Hinh_Anh_" + Utilities.formatDate(new Date(), "GMT+7", "yyyyMMdd_HHmmss") + ".jpg");
-        var photoBlob = Utilities.newBlob(photoBytes, data.photoMimeType || "image/jpeg", photoFileName);
-        var photoFile = folder.createFile(photoBlob);
-        photoFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        linkHinhAnhDrive = photoFile.getUrl();
-      } catch (errPhoto) {
-        linkHinhAnhDrive = "Lỗi tạo file ảnh: " + errPhoto.toString();
-      }
-    }
-
-    // 4. Kiểm tra dòng tiêu đề đúng 8 cột chuẩn của bảng tính
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Cảm Xúc",
-        "Chủ Đề",
-        "Mức Độ Hỗ Trợ",
-        "Nội Dung Chia Sẻ",
-        "Link Ghi Âm Drive",
-        "Link Hình Ảnh Drive",
-        "Link Hồ Sơ Drive",
-        "Trạng Thái"
-      ]);
-      // Định dạng dòng tiêu đề in đậm
-      sheet.getRange(1, 1, 1, 8).setFontWeight("bold").setBackground("#F0FDF4");
-    }
-
-    // 5. Ghi dòng dữ liệu mới vào đúng 8 cột trong Google Sheet
-    sheet.appendRow([
-      data["Cảm Xúc"] || data.camXuc || "Vui vẻ",
-      data["Chủ Đề"] || data.chuDe || "Bạn bè",
-      data["Mức Độ Hỗ Trợ"] || data.mucDoHoTro || "Em muốn chia sẻ",
-      data["Nội Dung Chia Sẻ"] || data.noiDungChiaSe || data.message || "",
-      linkGhiAmDrive,
-      linkHinhAnhDrive,
-      data["Link Hồ Sơ Drive"] || ("Hồ sơ #" + (data.id || "")),
-      data["Trạng Thái"] || data.trangThai || "Mới tiếp nhận"
-    ]);
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      linkGhiAmDrive: linkGhiAmDrive,
-      linkHinhAnhDrive: linkHinhAnhDrive
-    })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "ok",
-    app: "Trạm Cảm Xúc Từ Trái Tim",
-    time: new Date().toISOString()
-  })).setMimeType(ContentService.MimeType.JSON);
-}`;
+  };
 
   const copyAppsScript = () => {
-    navigator.clipboard.writeText(gasSampleCode);
+    navigator.clipboard.writeText(SAMPLE_GAS_CODE);
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 3000);
   };
 
+  const formatSeconds = (sec: number) => {
+    const s = Math.round(sec || 0);
+    const mins = Math.floor(s / 60);
+    const remaining = s % 60;
+    return `${mins}:${remaining.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Top Header Bar for Teachers */}
-      <div className="bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Banner: Teacher Admin Console */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 bg-indigo-100 text-indigo-900 font-black rounded-lg text-xs">
-              DÀNH CHO GIÁO VIÊN & TƯ VẤN HỌC ĐƯỜNG
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2.5 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold rounded-full">
+              Khu Vực Bảo Mật
             </span>
-            <span className="text-xs text-slate-500 font-medium">Bảo mật thông tin nội bộ</span>
+            <span className="text-xs text-slate-400">Dành riêng cho Ban Giám Hiệu & Giáo Viên</span>
           </div>
-          <h2 className="text-2xl font-black text-slate-900 mt-1">Hộp Thư Tâm Sự & Hỗ Trợ Học Sinh</h2>
+          <h2 className="text-2xl font-black tracking-tight flex items-center gap-2">
+            Trang Quản Trị & Hỗ Trợ Học Sinh
+          </h2>
+          <p className="text-xs text-slate-300 mt-1 max-w-xl">
+            Tiếp nhận, lắng nghe ghi âm, xem ảnh, phân loại mức độ cần hỗ trợ và đồng bộ 8 cột dữ liệu vào Google Sheet và Drive.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-2 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
           >
-            <Code2 className="w-4 h-4 text-slate-600" />
+            <Code2 className="w-4 h-4" />
             Cấu hình Google Sheet
           </button>
 
           <button
-            onClick={handleSyncNow}
+            onClick={handleSyncAllNow}
             disabled={isSyncing}
-            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            Đồng bộ dữ liệu
+            {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ Google Drive'}
           </button>
 
-          <div className="flex items-center gap-1 border-l pl-2 border-slate-200">
-            <button
-              onClick={() => exportSubmissionsToCsv(submissions, false)}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Xuất CSV
-            </button>
-            <button
-              onClick={() => exportSubmissionsToCsv(submissions, true)}
-              title="Xuất CSV loại bỏ họ tên học sinh phục vụ báo cáo"
-              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl text-xs transition-colors"
-            >
-              Ẩn danh
-            </button>
-          </div>
+          <button
+            onClick={() => exportSubmissionsToCsv(submissions, false)}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-700"
+          >
+            <Download className="w-4 h-4" />
+            Xuất Excel/CSV (8 cột)
+          </button>
+
+          <button
+            onClick={() => setIsChangePasswordOpen(true)}
+            className="px-3.5 py-2 bg-amber-600/90 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+          >
+            <KeyRound className="w-4 h-4" />
+            Đổi mật khẩu
+          </button>
 
           <button
             onClick={onLogout}
-            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2 bg-rose-600/80 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            <LogOut className="w-4 h-4" />
             Thoát
           </button>
         </div>
       </div>
 
       {syncFeedback && (
-        <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between">
+        <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs">
+          <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
           <span>{syncFeedback}</span>
-          <button onClick={() => setSyncFeedback(null)} className="text-indigo-500 hover:text-indigo-800">✕</button>
         </div>
       )}
 
-      {/* 4 Summary Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-sky-100 text-sky-600 flex items-center justify-center shrink-0">
+      {/* Overview Statistics Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-pink-100 text-pink-700 flex items-center justify-center shrink-0">
             <Inbox className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-slate-900">{totalCount}</div>
-            <div className="text-xs font-bold text-slate-500">Tổng lời chia sẻ</div>
+            <div className="text-2xl font-black text-slate-800">{totalCount}</div>
+            <div className="text-xs font-semibold text-slate-500">Tổng lượt tâm sự</div>
           </div>
         </div>
 
-        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center shrink-0">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
             <Clock className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-pink-600">{newCount}</div>
-            <div className="text-xs font-bold text-slate-500">Mới tiếp nhận</div>
+            <div className="text-2xl font-black text-rose-600">{newCount}</div>
+            <div className="text-xs font-semibold text-slate-500">Mới tiếp nhận</div>
           </div>
         </div>
 
-        <div className="bg-white p-4 md:p-5 rounded-2xl border border-amber-200 shadow-xs flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 animate-pulse">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
             <ShieldAlert className="w-6 h-6" />
           </div>
           <div>
             <div className="text-2xl font-black text-amber-700">{urgentCount}</div>
-            <div className="text-xs font-bold text-amber-900">Cần hỗ trợ sớm</div>
+            <div className="text-xs font-semibold text-slate-500">Cần giúp đỡ sớm</div>
           </div>
         </div>
 
-        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
             <CheckCircle className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-emerald-600">{helpedCount}</div>
-            <div className="text-xs font-bold text-slate-500">Đã đồng hành/xử lý</div>
+            <div className="text-2xl font-black text-emerald-700">{helpedCount}</div>
+            <div className="text-xs font-semibold text-slate-500">Đã hỗ trợ xong</div>
           </div>
         </div>
       </div>
 
-      {/* Emotion Distribution Visual Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-            <BarChart3 className="w-4 h-4 text-indigo-600" /> Phân bố cảm xúc học sinh
-          </span>
-          <span className="text-xs text-slate-400">Không xếp hạng tiêu cực - hỗ trợ kịp thời</span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-          {(['happy', 'sad', 'anxious', 'angry', 'speechless', 'just_listen'] as const).map((key) => {
-            const count = emotionStats[key] || 0;
-            const emo = EMOTIONS[key];
-            const pct = totalCount > 0 ? Math.round((count / totalCount) * 100) : 0;
-            return (
-              <div key={key} className={`p-2.5 rounded-xl border ${emo.borderColor} ${emo.bgColor}`}>
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span>{emo.emoji} {emo.label}</span>
-                  <span className="font-mono">{count}</span>
-                </div>
-                <div className="w-full bg-slate-200/60 h-1.5 rounded-full overflow-hidden mt-1.5">
-                  <div className="bg-slate-700 h-full rounded-full" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Main Two-Column Layout: Cases List & Case Detail View */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Column: Filter and List of cases */}
-        <div className="lg:col-span-5 space-y-3">
-          {/* Filter Bar */}
-          <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs space-y-2">
+      {/* Main Workspace: 2-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Filter and Submissions List */}
+        <div className="lg:col-span-5 bg-white rounded-3xl p-4 md:p-5 border border-slate-200 shadow-sm space-y-4">
+          {/* Search & Filter Header */}
+          <div className="space-y-3">
             <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Tìm theo tên học sinh, lớp, từ khóa..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs outline-hidden focus:border-indigo-400"
+                placeholder="Tìm tên học sinh, lớp hoặc nội dung..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 bg-slate-50"
               />
             </div>
-            <div className="grid grid-cols-3 gap-1.5 text-xs">
+
+            {/* Media Filter Tabs */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setFilterMediaType('all')}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  filterMediaType === 'all' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                Tất cả ({submissions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMediaType('audio')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                  filterMediaType === 'audio' ? 'bg-white text-sky-900 shadow-xs font-black' : 'text-slate-600'
+                }`}
+              >
+                <Volume2 className="w-3.5 h-3.5 text-sky-600" /> Ghi âm
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMediaType('photo')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                  filterMediaType === 'photo' ? 'bg-white text-purple-900 shadow-xs font-black' : 'text-slate-600'
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5 text-purple-600" /> Ảnh
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMediaType('video')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                  filterMediaType === 'video' ? 'bg-white text-rose-900 shadow-xs font-black' : 'text-slate-600'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5 text-rose-600" /> Video
+              </button>
+            </div>
+
+            {/* Filters Row */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <select
+                value={filterEmotion}
+                onChange={(e) => setFilterEmotion(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 font-semibold"
+              >
+                <option value="all">Tất cả cảm xúc</option>
+                <option value="happy">😊 Vui vẻ</option>
+                <option value="sad">😢 Buồn bã</option>
+                <option value="anxious">😟 Lo lắng</option>
+                <option value="angry">😡 Tức giận</option>
+                <option value="speechless">😶 Khó nói</option>
+                <option value="just_listen">💗 Chỉ muốn lắng nghe</option>
+              </select>
+
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-700 bg-white"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 font-semibold"
               >
                 <option value="all">Tất cả trạng thái</option>
                 <option value="new">Mới tiếp nhận</option>
@@ -430,54 +472,23 @@ function doGet(e) {
                 <option value="helped">Đã hỗ trợ</option>
                 <option value="closed">Đã đóng</option>
               </select>
-
-              <select
-                value={filterEmotion}
-                onChange={(e) => setFilterEmotion(e.target.value)}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-700 bg-white"
-              >
-                <option value="all">Tất cả cảm xúc</option>
-                <option value="happy">Vui vẻ</option>
-                <option value="sad">Buồn bã</option>
-                <option value="anxious">Lo lắng</option>
-                <option value="angry">Tức giận</option>
-                <option value="speechless">Khó nói</option>
-                <option value="just_listen">Muốn lắng nghe</option>
-              </select>
-
-              <select
-                value={filterTopic}
-                onChange={(e) => setFilterTopic(e.target.value)}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-700 bg-white"
-              >
-                <option value="all">Tất cả chủ đề</option>
-                {TOPICS.map((t) => (
-                  <option key={t.id} value={t.id}>{t.label}</option>
-                ))}
-              </select>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <button
-                onClick={() => setFilterUrgentOnly(!filterUrgentOnly)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 ${
-                  filterUrgentOnly
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" /> Chỉ xem cần hỗ trợ sớm ({urgentCount})
-              </button>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Hiển thị {filteredList.length}/{totalCount}
-              </span>
-            </div>
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-amber-900 bg-amber-50/80 border border-amber-200 px-3 py-1.5 rounded-xl">
+              <input
+                type="checkbox"
+                checked={filterUrgentOnly}
+                onChange={(e) => setFilterUrgentOnly(e.target.checked)}
+                className="rounded-sm text-amber-600 focus:ring-amber-500"
+              />
+              <span>Chỉ xem trường hợp cần giúp đỡ sớm (SOS)</span>
+            </label>
           </div>
 
-          {/* Cases List */}
-          <div className="space-y-2 max-h-[620px] overflow-y-auto pr-1">
+          {/* Submissions List View */}
+          <div className="space-y-2.5 max-h-[620px] overflow-y-auto pr-1">
             {filteredList.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-400 text-xs">
+              <div className="text-center py-12 text-slate-400 text-xs">
                 Không tìm thấy lời nhắn nào phù hợp với bộ lọc.
               </div>
             ) : (
@@ -485,17 +496,20 @@ function doGet(e) {
                 const isSelected = selectedCase?.id === item.id;
                 const emo = EMOTIONS[item.emotion] || EMOTIONS.happy;
                 const isUrgent = item.supportLevel === 'urgent' || item.isUrgentAlert;
+                const hasAudio = Boolean(item.audioBase64 || item.audioBlobUrl || item.audioDriveUrl);
+                const hasPhoto = Boolean(item.photoUrl || item.photoBase64 || item.photoDriveUrl);
+                const hasVideo = Boolean(item.videoBase64 || item.videoBlobUrl || item.videoDriveUrl);
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => setSelectedCaseId(item.id)}
-                    className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                    className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer text-left ${
                       isSelected
-                        ? 'border-indigo-500 bg-indigo-50/50 shadow-sm'
+                        ? 'border-indigo-500 bg-indigo-50/40 shadow-xs'
                         : isUrgent
-                        ? 'border-amber-300 bg-amber-50/40 hover:bg-amber-50'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
+                        ? 'border-amber-200 bg-amber-50/30 hover:bg-amber-50/60'
+                        : 'border-slate-100 bg-slate-50/50 hover:bg-slate-100'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
@@ -512,31 +526,42 @@ function doGet(e) {
                       </div>
 
                       <div className="text-[10px] text-slate-400 font-mono">
-                        {new Date(item.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                        {formatSafeTimeOnly(item.createdAt)}
                       </div>
                     </div>
 
                     <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed mb-2 font-medium">
-                      {item.textMessage || '(Học sinh gửi tin nhắn bằng giọng nói hoặc hình ảnh)'}
+                      {item.textMessage || '(Học sinh gửi tin nhắn bằng tệp âm thanh, video hoặc ảnh)'}
                     </p>
 
-                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
-                      <div className="flex items-center gap-1.5">
+                    {/* Media Badges & Drive Sync Indicator */}
+                    <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100">
+                      <div className="flex flex-wrap items-center gap-1">
                         {isUrgent && (
                           <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-black rounded-md text-[10px]">
-                            Cần hỗ trợ sớm
+                            SOS
                           </span>
                         )}
-                        {(item.audioBase64 || item.audioBlobUrl) && (
+                        {hasAudio && (
                           <span className="px-1.5 py-0.5 bg-sky-100 text-sky-800 font-bold rounded-md text-[10px] flex items-center gap-0.5">
                             <Volume2 className="w-2.5 h-2.5" /> Ghi âm
                           </span>
                         )}
-                        {item.photoUrl && (
+                        {hasPhoto && (
                           <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 font-bold rounded-md text-[10px] flex items-center gap-0.5">
                             <ImageIcon className="w-2.5 h-2.5" /> Ảnh
                           </span>
                         )}
+                        {hasVideo && (
+                          <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 font-bold rounded-md text-[10px] flex items-center gap-0.5">
+                            <Video className="w-2.5 h-2.5" /> Video
+                          </span>
+                        )}
+                        {item.audioDriveUrl || item.photoDriveUrl || item.videoDriveUrl ? (
+                          <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded-md text-[10px] flex items-center gap-0.5" title="Đã có link Google Drive">
+                            <CloudCheck className="w-2.5 h-2.5 text-emerald-600" /> Drive
+                          </span>
+                        ) : null}
                       </div>
 
                       <span
@@ -548,13 +573,7 @@ function doGet(e) {
                             : 'bg-slate-100 text-slate-700'
                         }`}
                       >
-                        {item.status === 'new'
-                          ? 'Mới'
-                          : item.status === 'helped'
-                          ? 'Đã hỗ trợ'
-                          : item.status === 'direct_chat'
-                          ? 'Cần gặp'
-                          : 'Đang xem'}
+                        {getVietnameseStatus(item.status)}
                       </span>
                     </div>
                   </div>
@@ -571,8 +590,8 @@ function doGet(e) {
               {/* Case Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{EMOTIONS[selectedCase.emotion]?.emoji}</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">{EMOTIONS[selectedCase.emotion]?.emoji || '💖'}</span>
                     <div>
                       <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
                         {selectedCase.isAnonymous ? 'Học sinh ẩn danh' : selectedCase.studentName}
@@ -581,7 +600,7 @@ function doGet(e) {
                         </span>
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Gửi lúc {new Date(selectedCase.createdAt).toLocaleString('vi-VN')}
+                        Mã hồ sơ: <span className="font-mono font-bold text-slate-600">HS-{selectedCase.id}</span> • Gửi lúc {formatSafeDateTime(selectedCase.createdAt)}
                       </p>
                     </div>
                   </div>
@@ -607,10 +626,10 @@ function doGet(e) {
               {/* Tags & Support Preference */}
               <div className="flex flex-wrap gap-2 text-xs">
                 <span className="px-2.5 py-1 rounded-lg bg-pink-50 text-pink-800 font-bold border border-pink-200">
-                  Cảm xúc: {EMOTIONS[selectedCase.emotion]?.label}
+                  Cảm xúc: {getVietnameseEmotion(selectedCase.emotion)}
                 </span>
                 <span className="px-2.5 py-1 rounded-lg bg-sky-50 text-sky-800 font-bold border border-sky-200">
-                  Chủ đề: {TOPICS.find((t) => t.id === selectedCase.topic)?.label || selectedCase.topic}
+                  Chủ đề: {getVietnameseTopic(selectedCase.topic)}
                 </span>
                 <span
                   className={`px-2.5 py-1 rounded-lg font-bold border ${
@@ -619,64 +638,302 @@ function doGet(e) {
                       : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   }`}
                 >
-                  Mong muốn: {selectedCase.supportLevel === 'urgent' ? 'Cần giúp đỡ sớm' : selectedCase.supportLevel === 'chat' ? 'Muốn trò chuyện' : 'Chỉ chia sẻ'}
+                  Mong muốn: {getVietnameseSupport(selectedCase.supportLevel)}
                 </span>
               </div>
 
               {/* Message text content */}
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                <div className="text-xs font-bold text-slate-500 mb-1">Nội dung học sinh gửi:</div>
+                <div className="text-xs font-bold text-slate-500 mb-1">Nội dung học sinh chia sẻ:</div>
                 <p className="text-sm text-slate-900 leading-relaxed font-medium whitespace-pre-wrap">
-                  {selectedCase.textMessage || '(Học sinh không để lại tin nhắn chữ)'}
+                  {selectedCase.textMessage || '(Học sinh không để lại tin nhắn chữ mà gửi tệp đa phương tiện)'}
                 </p>
               </div>
 
-              {/* Audio playback if present */}
-              {(selectedCase.audioBase64 || selectedCase.audioBlobUrl) && (
-                <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center">
-                      <Volume2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-sky-950">Bản ghi âm giọng nói học sinh</div>
-                      <div className="text-xs text-sky-700">
-                        Thời lượng: {selectedCase.audioDuration || 0} giây
+              {/* 1. AUDIO SECTION: Dedicated audio player & Google Drive links */}
+              {(selectedCase.audioBase64 || selectedCase.audioBlobUrl || selectedCase.audioDriveUrl) && (
+                <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <Volume2 className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-black text-sky-950 flex items-center gap-2">
+                          <span>Bản ghi âm giọng nói học sinh</span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-sky-200 text-sky-800 rounded">
+                            {selectedCase.audioMimeType || 'audio/webm'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-sky-700">
+                          Tệp: {selectedCase.audioFileName || `Ghi_am_${selectedCase.id}.webm`} • Thời lượng: {selectedCase.audioDuration || formatSeconds(audioDurationTime)}s
+                          {selectedCase.audioFileId && (
+                            <span className="ml-2 text-slate-500">ID: {selectedCase.audioFileId}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
+
+                    {/* Action buttons: Phát âm thanh, Mở Drive, Tải về */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleTogglePlayAudio(
+                            selectedCase.id,
+                            selectedCase.audioBlobUrl || selectedCase.audioBase64 || selectedCase.audioDriveUrl
+                          )
+                        }
+                        className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-transform active:scale-95"
+                      >
+                        {playingAudioId === selectedCase.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        {playingAudioId === selectedCase.id ? 'Dừng phát' : 'Phát âm thanh'}
+                      </button>
+
+                      {selectedCase.audioDriveUrl && (
+                        <a
+                          href={selectedCase.audioDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-2 bg-white hover:bg-sky-100 text-sky-800 border border-sky-300 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Mở tệp Google Drive
+                        </a>
+                      )}
+
+                      {(selectedCase.audioBlobUrl || selectedCase.audioBase64) && (
+                        <a
+                          href={selectedCase.audioBlobUrl || selectedCase.audioBase64}
+                          download={selectedCase.audioFileName || `Ghi_am_${selectedCase.id}.webm`}
+                          className="px-3 py-2 bg-sky-100 hover:bg-sky-200 text-sky-900 font-bold rounded-xl text-xs flex items-center gap-1"
+                          title="Tải tệp âm thanh về máy tính"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Tải về
+                        </a>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    onClick={() => handleTogglePlayAudio(selectedCase.id, selectedCase.audioBase64 || selectedCase.audioBlobUrl)}
-                    className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
-                  >
-                    {playingAudioId === selectedCase.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                    {playingAudioId === selectedCase.id ? 'Dừng phát' : 'Nghe ghi âm'}
-                  </button>
+
+                  {/* Playback progress bar */}
+                  {playingAudioId === selectedCase.id && (
+                    <div className="space-y-1 pt-1">
+                      <div className="w-full bg-sky-200 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-sky-600 h-full transition-all duration-100"
+                          style={{
+                            width: `${audioDurationTime > 0 ? (audioCurrentTime / audioDurationTime) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-sky-700 font-mono font-bold">
+                        <span>{formatSeconds(audioCurrentTime)}</span>
+                        <span>{formatSeconds(audioDurationTime || selectedCase.audioDuration || 0)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Attached Photo if present */}
-              {selectedCase.photoUrl && (
-                <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
-                      <ImageIcon className="w-4 h-4 text-purple-600" /> Hình ảnh học sinh đính kèm
-                    </span>
-                    <button
-                      onClick={() => setViewingPhoto(selectedCase.photoUrl || null)}
-                      className="text-xs font-bold text-purple-700 hover:underline flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Xem kích thước lớn
-                    </button>
+              {/* 2. PHOTO SECTION: Dedicated image preview, modal, & Drive links */}
+              {(selectedCase.photoUrl || selectedCase.photoBase64 || selectedCase.photoDriveUrl) && (
+                <div className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-black text-purple-950 flex items-center gap-2">
+                          <span>Hình ảnh học sinh đính kèm</span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-purple-200 text-purple-800 rounded">
+                            {selectedCase.photoMimeType || 'image/jpeg'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-purple-700">
+                          Tệp: {selectedCase.photoFileName || `Anh_${selectedCase.id}.jpg`}
+                          {selectedCase.photoFileId && (
+                            <span className="ml-2 text-slate-500">ID: {selectedCase.photoFileId}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingPhoto({
+                            url: selectedCase.photoUrl || selectedCase.photoBase64 || selectedCase.photoDriveUrl || '',
+                            title: `Ảnh của ${selectedCase.isAnonymous ? 'Học sinh ẩn danh' : selectedCase.studentName}`,
+                            fileId: selectedCase.photoFileId,
+                          })
+                        }
+                        className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Xem ảnh
+                      </button>
+
+                      {selectedCase.photoDriveUrl && (
+                        <a
+                          href={selectedCase.photoDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-2 bg-white hover:bg-purple-100 text-purple-800 border border-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Mở tệp Google Drive
+                        </a>
+                      )}
+
+                      {(selectedCase.photoUrl || selectedCase.photoBase64) && (
+                        <a
+                          href={selectedCase.photoUrl || selectedCase.photoBase64}
+                          download={selectedCase.photoFileName || `Hinh_anh_${selectedCase.id}.jpg`}
+                          className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold rounded-xl text-xs flex items-center gap-1"
+                          title="Tải ảnh về máy tính"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Tải về
+                        </a>
+                      )}
+                    </div>
                   </div>
-                  <img
-                    src={selectedCase.photoUrl}
-                    alt="Ảnh học sinh gửi"
-                    onClick={() => setViewingPhoto(selectedCase.photoUrl || null)}
-                    className="max-h-48 rounded-xl object-contain border border-purple-200 cursor-pointer hover:opacity-95"
-                  />
+
+                  {/* Thumbnail preview */}
+                  {(selectedCase.photoUrl || selectedCase.photoBase64) && (
+                    <div className="relative rounded-xl overflow-hidden border border-purple-200 bg-white inline-block">
+                      <img
+                        src={selectedCase.photoUrl || selectedCase.photoBase64}
+                        alt="Ảnh đính kèm"
+                        onClick={() =>
+                          setViewingPhoto({
+                            url: selectedCase.photoUrl || selectedCase.photoBase64 || '',
+                            title: `Ảnh của ${selectedCase.isAnonymous ? 'Học sinh ẩn danh' : selectedCase.studentName}`,
+                            fileId: selectedCase.photoFileId,
+                          })
+                        }
+                        className="max-h-48 rounded-xl object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* 3. VIDEO SECTION: Dedicated video player & Drive links */}
+              {(selectedCase.videoBase64 || selectedCase.videoBlobUrl || selectedCase.videoDriveUrl) && (
+                <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <Video className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-black text-rose-950 flex items-center gap-2">
+                          <span>Video học sinh đính kèm</span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-rose-200 text-rose-800 rounded">
+                            {selectedCase.videoMimeType || 'video/mp4'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-rose-700">
+                          Tệp: {selectedCase.videoFileName || `Video_${selectedCase.id}.mp4`} • Thời lượng: {selectedCase.videoDuration || 0}s
+                          {selectedCase.videoFileId && (
+                            <span className="ml-2 text-slate-500">ID: {selectedCase.videoFileId}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingVideo({
+                            url: selectedCase.videoBase64 || selectedCase.videoBlobUrl || selectedCase.videoDriveUrl || '',
+                            title: `Video của ${selectedCase.isAnonymous ? 'Học sinh ẩn danh' : selectedCase.studentName}`,
+                            fileId: selectedCase.videoFileId,
+                          })
+                        }
+                        className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Play className="w-4 h-4" />
+                        Xem video
+                      </button>
+
+                      {selectedCase.videoDriveUrl && (
+                        <a
+                          href={selectedCase.videoDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-2 bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Mở tệp Google Drive
+                        </a>
+                      )}
+
+                      {(selectedCase.videoBlobUrl || selectedCase.videoBase64) && (
+                        <a
+                          href={selectedCase.videoBlobUrl || selectedCase.videoBase64}
+                          download={selectedCase.videoFileName || `Video_${selectedCase.id}.mp4`}
+                          className="px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-900 font-bold rounded-xl text-xs flex items-center gap-1"
+                          title="Tải video về máy tính"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Tải về
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline Video Player */}
+                  {(selectedCase.videoBase64 || selectedCase.videoBlobUrl) && (
+                    <div className="rounded-xl overflow-hidden border border-rose-200 bg-black max-w-md">
+                      <video
+                        src={selectedCase.videoBase64 || selectedCase.videoBlobUrl}
+                        controls
+                        playsInline
+                        className="w-full max-h-56 object-contain"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 4. GOOGLE DRIVE SYNC STATUS BOX */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                    {selectedCase.syncedToGoogle ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                    )}
+                    <span>
+                      Trạng thái đồng bộ Drive: {selectedCase.syncedToGoogle ? 'Đã đồng bộ lên Google Drive & Sheet' : 'Đang lưu trữ trên máy (Chờ đồng bộ Drive)'}
+                    </span>
+                  </div>
+                  <div className="text-slate-500 mt-0.5">
+                    {selectedCase.lastSyncedAt
+                      ? `Lần đồng bộ gần nhất: ${formatSafeDateTime(selectedCase.lastSyncedAt)}`
+                      : selectedCase.syncError
+                      ? `Thông báo: ${selectedCase.syncError}`
+                      : 'Tệp đã được lưu an toàn trong hệ thống.'}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleSyncSingleCase(selectedCase)}
+                  disabled={isSingleSyncing}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shrink-0"
+                >
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  {isSingleSyncing ? 'Đang gửi...' : 'Đồng bộ hồ sơ này lên Drive'}
+                </button>
+              </div>
 
               {/* Support Plan Box */}
               <div className="border border-slate-200 rounded-2xl p-4 bg-white">
@@ -685,6 +942,7 @@ function doGet(e) {
                     <FileText className="w-4 h-4 text-indigo-600" /> Kế hoạch hỗ trợ của nhà trường
                   </span>
                   <button
+                    type="button"
                     onClick={handleSavePlan}
                     className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs"
                   >
@@ -714,7 +972,7 @@ function doGet(e) {
                       <div key={note.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
                         <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-1">
                           <span>{note.author}</span>
-                          <span className="text-slate-400">{new Date(note.date).toLocaleString('vi-VN')}</span>
+                          <span className="text-slate-400">{formatSafeDateTime(note.date)}</span>
                         </div>
                         <p className="text-slate-800 font-medium">{note.content}</p>
                       </div>
@@ -744,7 +1002,7 @@ function doGet(e) {
                     <button
                       type="button"
                       onClick={() => {
-                        if (confirm('Em có chắc chắn muốn xóa lời nhắn này khỏi hệ thống theo quy định lưu trữ?')) {
+                        if (confirm('Thầy cô có chắc chắn muốn xóa hồ sơ này khỏi hệ thống?')) {
                           onDeleteSubmission(selectedCase.id);
                         }
                       }}
@@ -766,26 +1024,90 @@ function doGet(e) {
             </div>
           ) : (
             <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center text-slate-400 text-sm">
-              Chọn một lời nhắn ở cột bên trái để xem chi tiết và xử lý.
+              Chọn một lời nhắn ở cột bên trái để xem chi tiết và lắng nghe ghi âm / xem ảnh / video.
             </div>
           )}
         </div>
       </div>
 
-      {/* Lightbox for student photo */}
+      {/* Lightbox Modal for Photo */}
       {viewingPhoto && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
           onClick={() => setViewingPhoto(null)}
         >
-          <div className="relative max-w-3xl max-h-[90vh]">
-            <img src={viewingPhoto} alt="Kích thước lớn" className="max-w-full max-h-[85vh] rounded-2xl object-contain" />
-            <button
-              onClick={() => setViewingPhoto(null)}
-              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full hover:bg-black"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div
+            className="relative max-w-4xl max-h-[92vh] bg-slate-900 rounded-3xl p-4 flex flex-col items-center shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 text-white">
+              <span className="text-sm font-bold flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-purple-400" />
+                {viewingPhoto.title}
+              </span>
+              <button
+                onClick={() => setViewingPhoto(null)}
+                className="p-1 rounded-full bg-slate-800 hover:bg-slate-700 text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <img
+              src={viewingPhoto.url}
+              alt={viewingPhoto.title}
+              className="max-w-full max-h-[75vh] rounded-2xl object-contain border border-slate-700"
+            />
+            <div className="w-full pt-3 flex justify-end gap-2">
+              <a
+                href={viewingPhoto.url}
+                download="hinh_anh_hoc_sinh.jpg"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" /> Tải ảnh về máy
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Modal for Video */}
+      {viewingVideo && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setViewingVideo(null)}
+        >
+          <div
+            className="relative max-w-3xl w-full bg-slate-900 rounded-3xl p-4 flex flex-col items-center shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 text-white">
+              <span className="text-sm font-bold flex items-center gap-2">
+                <Video className="w-4 h-4 text-rose-400" />
+                {viewingVideo.title}
+              </span>
+              <button
+                onClick={() => setViewingVideo(null)}
+                className="p-1 rounded-full bg-slate-800 hover:bg-slate-700 text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <video
+              src={viewingVideo.url}
+              controls
+              autoPlay
+              playsInline
+              className="w-full max-h-[72vh] rounded-2xl object-contain border border-slate-700 bg-black"
+            />
+            <div className="w-full pt-3 flex justify-end gap-2">
+              <a
+                href={viewingVideo.url}
+                download="video_hoc_sinh.mp4"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" /> Tải video về máy
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -793,11 +1115,13 @@ function doGet(e) {
       {/* Google Apps Script & Sheet Settings Modal */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
               <div className="flex items-center gap-2.5">
                 <Code2 className="w-6 h-6 text-indigo-600" />
-                <h3 className="text-xl font-black text-slate-900">Cấu Hình Kết Nối Google Sheet</h3>
+                <h3 className="text-xl font-black text-slate-900">
+                  Cấu Hình Kết Nối Google Sheet & Google Drive
+                </h3>
               </div>
               <button
                 onClick={() => setIsSettingsOpen(false)}
@@ -812,45 +1136,77 @@ function doGet(e) {
                 <label className="block font-bold text-slate-900 mb-1">
                   Đường dẫn Web App (Google Apps Script URL):
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     value={gasUrl}
                     onChange={(e) => setGasUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs focus:ring-2 focus:ring-indigo-300"
                   />
-                  <button
-                    onClick={handleSaveGasUrl}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shrink-0"
-                  >
-                    Lưu
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveGasUrl}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shrink-0"
+                    >
+                      Lưu URL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestGasConnection}
+                      disabled={isTestingGas}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl shrink-0"
+                    >
+                      {isTestingGas ? 'Đang thử...' : 'Kiểm tra kết nối'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
+              {testResult && (
+                <div
+                  className={`p-3 rounded-2xl border ${
+                    testResult.success
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      : 'bg-amber-50 border-amber-300 text-amber-900'
+                  }`}
+                >
+                  <div className="font-bold flex items-center gap-1.5">
+                    {testResult.success ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-amber-600" />}
+                    <span>{testResult.message}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Instructions */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
-                <div className="font-black text-slate-900">Hướng dẫn cấu hình kết nối Google Sheet chuẩn 8 cột:</div>
+                <div className="font-black text-slate-900">
+                  Hướng dẫn cấu hình kết nối Google Sheet chuẩn 8 cột & Google Drive:
+                </div>
                 <div className="text-[11px] bg-emerald-50 text-emerald-900 p-2.5 rounded-xl border border-emerald-200 leading-relaxed font-semibold">
-                  📌 <strong>Bảng tính gồm 8 cột chuẩn:</strong><br />
+                  📌 <strong>Bảng tính gồm đúng 8 cột chuẩn:</strong><br />
                   1. Cảm Xúc | 2. Chủ Đề | 3. Mức Độ Hỗ Trợ | 4. Nội Dung Chia Sẻ | 5. Link Ghi Âm Drive | 6. Link Hình Ảnh Drive | 7. Link Hồ Sơ Drive | 8. Trạng Thái<br />
-                  💡 <em>Mã nguồn đã tích hợp sẵn tính năng tự động tạo file ghi âm (.webm) và ảnh (.jpg) lên Google Drive rồi tạo đường link điền vào Cột 5 & Cột 6!</em>
+                  💡 <em>Mã nguồn bên dưới đã tự động tạo thư mục "Trạm Cảm Xúc - Tệp Đính Kèm" trên Google Drive và điền đường link xem công khai vào đúng Cột 5 và Cột 6!</em>
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 leading-relaxed">
                   <li>Tạo một Google Sheet mới trên Google Drive của trường.</li>
                   <li>Vào menu <strong>Tiện ích mở rộng (Extensions)</strong> &gt; chọn <strong>Apps Script</strong>.</li>
-                  <li>Xóa mã cũ và dán toàn bộ đoạn mã bên dưới vào tệp <code>Code.gs</code>.</li>
+                  <li>Xóa toàn bộ mã cũ và dán toàn bộ đoạn mã bên dưới vào tệp <code>Code.gs</code>.</li>
                   <li>Bấm <strong>Triển khai (Deploy)</strong> &gt; chọn <strong>Tùy chọn triển khai mới (New deployment)</strong> &gt; Loại: <strong>Ứng dụng web (Web app)</strong>.</li>
-                  <li>Mục <em>Ai có quyền truy cập (Who has access)</em>: chọn <strong>Bất kỳ ai (Anyone)</strong>.</li>
-                  <li>Sao chép URL web app và dán vào ô bên trên để đồng bộ trực tiếp!</li>
+                  <li>
+                    <strong>QUAN TRỌNG:</strong> Mục <em>Ai có quyền truy cập (Who has access)</em>, thầy cô phải chọn <strong>Bất kỳ ai (Anyone)</strong> để ứng dụng có thể truyền file vào Drive.
+                  </li>
+                  <li>Sao chép URL Web App (kết thúc bằng <code>/exec</code>) và dán vào ô bên trên để đồng bộ!</li>
                 </ol>
               </div>
 
               {/* Code block with copy button */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-bold text-slate-900">Mã nguồn Code.gs mẫu chuẩn:</span>
+                  <span className="font-bold text-slate-900">Mã nguồn Code.gs chuẩn hỗ trợ Ghi âm, Ảnh & Video:</span>
                   <button
+                    type="button"
                     onClick={copyAppsScript}
                     className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-bold flex items-center gap-1"
                   >
@@ -858,13 +1214,14 @@ function doGet(e) {
                     {copiedCode ? 'Đã sao chép!' : 'Sao chép mã'}
                   </button>
                 </div>
-                <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl overflow-x-auto text-[11px] font-mono max-h-48">
-                  {gasSampleCode}
+                <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl overflow-x-auto text-[11px] font-mono max-h-52">
+                  {SAMPLE_GAS_CODE}
                 </pre>
               </div>
 
               <div className="flex justify-end pt-2">
                 <button
+                  type="button"
                   onClick={() => setIsSettingsOpen(false)}
                   className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl"
                 >
@@ -875,6 +1232,12 @@ function doGet(e) {
           </div>
         </div>
       )}
+
+      {/* Modal Thay Đổi Mật Khẩu Giáo Viên */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </div>
   );
 };

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { EmotionType, TopicType, SupportLevel } from '../types';
 import { EMOTIONS, TOPICS, SUPPORT_LEVELS, STICKERS } from '../constants/emotions';
 import { AudioRecorder } from './AudioRecorder';
-import { ImageUploadBox } from './ImageUploadBox';
+import { MediaUploadBox } from './MediaUploadBox';
 import {
   HappySunIcon,
   SadDropletIcon,
@@ -20,6 +20,7 @@ import {
   UserCheck,
   UserX,
   Volume2,
+  Video,
   Trash2,
 } from 'lucide-react';
 
@@ -38,7 +39,16 @@ interface StudentShareFormProps {
     sticker?: string;
     audioBase64?: string;
     audioDuration?: number;
+    audioFileName?: string;
+    audioMimeType?: string;
     photoUrl?: string;
+    photoBase64?: string;
+    photoFileName?: string;
+    photoMimeType?: string;
+    videoBase64?: string;
+    videoDuration?: number;
+    videoFileName?: string;
+    videoMimeType?: string;
   }) => Promise<void>;
 }
 
@@ -57,16 +67,28 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
   const [studentClass, setStudentClass] = useState<string>('Lớp 3A');
   const [isAnonymous, setIsAnonymous] = useState<boolean>(true);
 
-  // Attached media
+  // Attached media state
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
   const [audioDuration, setAudioDuration] = useState<number>(0);
+  const [audioFileName, setAudioFileName] = useState<string>('');
+  const [audioMimeType, setAudioMimeType] = useState<string>('');
+
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoFileName, setPhotoFileName] = useState<string>('');
+  const [photoMimeType, setPhotoMimeType] = useState<string>('');
+
+  const [videoBase64, setVideoBase64] = useState<string | null>(null);
+  const [videoDuration, setVideoDuration] = useState<number>(0);
+  const [videoFileName, setVideoFileName] = useState<string>('');
+  const [videoMimeType, setVideoMimeType] = useState<string>('');
 
   // UI tabs
   const [activeTab, setActiveTab] = useState<'text' | 'audio' | 'photo'>(
     initialMode === 'audio' ? 'audio' : initialMode === 'image' ? 'photo' : 'text'
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStep, setSubmitStep] = useState<string>('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const promptSuggestions = [
     'Hôm nay có chuyện làm em vui hoặc buồn...',
@@ -75,25 +97,44 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
     'Có điều này em chưa biết nói với ai ở lớp...',
   ];
 
-  const handleAudioReady = (_blob: Blob, base64: string, durationSec: number) => {
+  const handleAudioReady = (_blob: Blob, base64: string, durationSec: number, fileName?: string, mimeType?: string) => {
     setAudioBase64(base64);
     setAudioDuration(durationSec);
+    if (fileName) setAudioFileName(fileName);
+    if (mimeType) setAudioMimeType(mimeType);
   };
 
-  const handleImageReady = (url: string) => {
-    setPhotoUrl(url);
+  const handlePhotoReady = (dataUrl: string, fileName?: string, mimeType?: string) => {
+    setPhotoUrl(dataUrl);
+    if (fileName) setPhotoFileName(fileName);
+    if (mimeType) setPhotoMimeType(mimeType);
+  };
+
+  const handleVideoReady = (dataUrl: string, durationSec?: number, fileName?: string, mimeType?: string) => {
+    setVideoBase64(dataUrl);
+    setVideoDuration(durationSec || 0);
+    if (fileName) setVideoFileName(fileName);
+    if (mimeType) setVideoMimeType(mimeType);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!textMessage.trim() && !audioBase64 && !photoUrl) {
-      alert('Em hãy viết vài lời nhắn hoặc ghi âm để gửi đến thầy cô nhé!');
+    if (!textMessage.trim() && !audioBase64 && !photoUrl && !videoBase64) {
+      alert('Em hãy viết vài lời nhắn hoặc ghi âm / chụp ảnh để gửi đến thầy cô nhé!');
       return;
     }
 
     setIsSubmitting(true);
+    setSubmitError(null);
+    setSubmitStep('Đang chuẩn bị tệp tin đa phương tiện...');
+
     try {
+      if (audioBase64 || photoUrl || videoBase64) {
+        setSubmitStep('Đang mã hóa và lưu tệp an toàn...');
+      }
+      setSubmitStep('Đang đồng bộ lên Google Drive và hệ thống...');
+
       await onSaveSubmission({
         emotion: selectedEmotion,
         topic: selectedTopic,
@@ -105,12 +146,23 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
         sticker: selectedSticker,
         audioBase64: audioBase64 || undefined,
         audioDuration: audioDuration || undefined,
+        audioFileName: audioFileName || undefined,
+        audioMimeType: audioMimeType || undefined,
         photoUrl: photoUrl || undefined,
+        photoBase64: photoUrl || undefined,
+        photoFileName: photoFileName || undefined,
+        photoMimeType: photoMimeType || undefined,
+        videoBase64: videoBase64 || undefined,
+        videoDuration: videoDuration || undefined,
+        videoFileName: videoFileName || undefined,
+        videoMimeType: videoMimeType || undefined,
       });
+
+      setSubmitStep('Hoàn tất!');
       onSubmitSuccess();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Có lỗi nhỏ khi lưu. Em hãy thử lại nhé!');
+      setSubmitError(err?.message || 'Có lỗi kết nối. Dữ liệu đã được lưu lại, em có thể thử gửi lại nhé!');
     } finally {
       setIsSubmitting(false);
     }
@@ -217,7 +269,7 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
         </div>
       </div>
 
-      {/* Step 3: Expression mode tabs (Text / Audio / Photo) */}
+      {/* Step 3: Expression mode tabs (Text / Audio / Photo & Video) */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
           <label className="text-sm font-black text-slate-800">
@@ -251,7 +303,7 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5" />
-              Gửi ảnh {photoUrl && '●'}
+              Ảnh & Video {(photoUrl || videoBase64) && '●'}
             </button>
           </div>
         </div>
@@ -259,7 +311,6 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
         {/* Tab 1: Text message */}
         {activeTab === 'text' && (
           <div className="space-y-3">
-            {/* Friendly prompt suggestion buttons */}
             <div className="flex flex-wrap gap-1.5">
               {promptSuggestions.map((p, idx) => (
                 <button
@@ -309,13 +360,14 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
             {audioBase64 && (
               <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                  <Volume2 className="w-4 h-4 text-emerald-600" /> Đã đính kèm bản ghi âm ({audioDuration}s)
+                  <Volume2 className="w-4 h-4 text-emerald-600" /> Đã đính kèm tệp âm thanh ({audioDuration}s)
                 </span>
                 <button
                   type="button"
                   onClick={() => {
                     setAudioBase64(null);
                     setAudioDuration(0);
+                    setAudioFileName('');
                   }}
                   className="text-xs text-rose-600 font-bold hover:underline flex items-center gap-1"
                 >
@@ -326,12 +378,18 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
           </div>
         )}
 
-        {/* Tab 3: Photo Upload */}
+        {/* Tab 3: Photo & Video Upload */}
         {activeTab === 'photo' && (
           <div>
-            <ImageUploadBox
-              onImageReady={handleImageReady}
-              onClearImage={() => setPhotoUrl(null)}
+            <MediaUploadBox
+              onPhotoReady={handlePhotoReady}
+              onVideoReady={handleVideoReady}
+              onClearMedia={() => {
+                setPhotoUrl(null);
+                setVideoBase64(null);
+                setPhotoFileName('');
+                setVideoFileName('');
+              }}
             />
           </div>
         )}
@@ -418,16 +476,48 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
       </div>
 
       {/* Summary of attached attachments */}
-      {(audioBase64 || photoUrl) && (
+      {(audioBase64 || photoUrl || videoBase64) && (
         <div className="mb-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600 bg-pink-50/50 p-2.5 rounded-xl border border-pink-200">
-          <span>Đính kèm:</span>
-          {audioBase64 && <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md">🎙️ Bản ghi âm ({audioDuration}s)</span>}
-          {photoUrl && <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md">🖼️ 1 Hình ảnh</span>}
+          <span>Đính kèm tệp:</span>
+          {audioBase64 && (
+            <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <Volume2 className="w-3 h-3" /> Ghi âm ({audioDuration}s)
+            </span>
+          )}
+          {photoUrl && (
+            <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <ImageIcon className="w-3 h-3" /> 1 Hình ảnh
+            </span>
+          )}
+          {videoBase64 && (
+            <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <Video className="w-3 h-3" /> 1 Video ({videoDuration}s)
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Error alert if submission failed */}
+      {submitError && (
+        <div className="mb-4 bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-2xl text-xs flex items-center justify-between">
+          <span>⚠️ {submitError}</span>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            className="px-3 py-1 bg-rose-600 text-white font-bold rounded-lg hover:bg-rose-700"
+          >
+            Thử lại
+          </button>
         </div>
       )}
 
       {/* Submit Button */}
-      <div className="flex items-center justify-end gap-3 pt-2">
+      <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+        {isSubmitting && (
+          <span className="text-xs text-slate-500 font-semibold animate-pulse">
+            {submitStep}
+          </span>
+        )}
         <button
           type="button"
           onClick={handleSubmit}
@@ -437,7 +527,7 @@ export const StudentShareForm: React.FC<StudentShareFormProps> = ({
           {isSubmitting ? (
             <>
               <Sparkles className="w-5 h-5 animate-spin" />
-              <span>Đang gửi đến thầy cô...</span>
+              <span>{submitStep || 'Đang gửi...'}</span>
             </>
           ) : (
             <>

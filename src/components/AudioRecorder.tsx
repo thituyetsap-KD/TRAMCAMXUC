@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Play, Pause, RotateCcw, Send, AlertCircle, Volume2, Sparkles } from 'lucide-react';
+import { Mic, Square, Play, Pause, RotateCcw, Volume2, Sparkles, CheckCircle2 } from 'lucide-react';
 
 interface AudioRecorderProps {
-  onAudioReady: (audioBlob: Blob, base64: string, durationSec: number) => void;
+  onAudioReady: (audioBlob: Blob, base64: string, durationSec: number, fileName?: string, mimeType?: string) => void;
   onCancel?: () => void;
   onSwitchToText?: () => void;
 }
@@ -15,6 +15,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
+  const [audioFileName, setAudioFileName] = useState<string>('Ghi_am.webm');
+  const [audioMimeType, setAudioMimeType] = useState<string>('audio/webm');
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playProgress, setPlayProgress] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -22,13 +24,16 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
+  const durationRef = useRef<number>(0);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const recordedBlobRef = useRef<Blob | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (audioUrl) URL.revokeObjectURL(audioUrl);
+      if (audioElementRef.current) audioElementRef.current.pause();
     };
   }, [audioUrl]);
 
@@ -36,6 +41,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setErrorMessage(null);
     audioChunksRef.current = [];
     setDuration(0);
+    durationRef.current = 0;
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -43,7 +49,13 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : 'audio/mp4';
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -53,17 +65,24 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mime });
         recordedBlobRef.current = audioBlob;
         const url = URL.createObjectURL(audioBlob);
         setAudioUrl(url);
 
-        // Convert to base64
+        const currentDuration = durationRef.current;
+        const fileName = `Ghi_am_${Date.now()}.webm`;
+        setAudioFileName(fileName);
+        setAudioMimeType(mime);
+
+        // Convert to base64 and IMMEDIATELY pass to parent form
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
           const base64data = reader.result as string;
           setAudioBase64(base64data);
+          // Critical fix: notify parent form immediately so audio is NEVER lost
+          onAudioReady(audioBlob, base64data, currentDuration, fileName, mime);
         };
 
         // Stop all tracks to release mic
@@ -74,7 +93,11 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       setRecordingState('recording');
 
       timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        setDuration((prev) => {
+          const next = prev + 1;
+          durationRef.current = next;
+          return next;
+        });
       }, 1000);
     } catch (err: any) {
       console.error('Microphone error:', err);
@@ -99,7 +122,11 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     if (mediaRecorderRef.current && recordingState === 'paused') {
       mediaRecorderRef.current.resume();
       timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        setDuration((prev) => {
+          const next = prev + 1;
+          durationRef.current = next;
+          return next;
+        });
       }, 1000);
       setRecordingState('recording');
     }
@@ -125,13 +152,16 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setAudioBase64(null);
     recordedBlobRef.current = null;
     setDuration(0);
+    durationRef.current = 0;
     setIsPlaying(false);
     setPlayProgress(0);
     setRecordingState('idle');
   };
 
   const togglePlayback = () => {
-    if (!audioElementRef.current && audioUrl) {
+    if (!audioUrl) return;
+
+    if (!audioElementRef.current) {
       const audio = new Audio(audioUrl);
       audioElementRef.current = audio;
 
@@ -147,21 +177,48 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       };
     }
 
-    if (audioElementRef.current) {
-      if (isPlaying) {
-        audioElementRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioElementRef.current.play();
-        setIsPlaying(true);
-      }
+    if (isPlaying) {
+      audioElementRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioElementRef.current.play();
+      setIsPlaying(true);
     }
   };
 
-  const handleConfirmAudio = () => {
-    if (recordedBlobRef.current && audioBase64) {
-      onAudioReady(recordedBlobRef.current, audioBase64, duration);
+  const handleAudioFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('audio/')) {
+      alert('Vui lòng chọn một tệp âm thanh (mp3, wav, m4a, webm, ogg).');
+      return;
     }
+
+    setAudioFileName(file.name);
+    const mime = file.type || 'audio/webm';
+    setAudioMimeType(mime);
+    recordedBlobRef.current = file;
+
+    const url = URL.createObjectURL(file);
+    setAudioUrl(url);
+
+    const tempAudio = new Audio(url);
+    tempAudio.onloadedmetadata = () => {
+      const sec = Math.round(tempAudio.duration || 0);
+      setDuration(sec);
+      durationRef.current = sec;
+    };
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const b64 = reader.result as string;
+      setAudioBase64(b64);
+      setRecordingState('recorded');
+      // Automatically pass to parent form
+      onAudioReady(file, b64, durationRef.current || 10, file.name, mime);
+    };
+    reader.readAsDataURL(file);
   };
 
   const formatTime = (secs: number) => {
@@ -185,7 +242,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       {errorMessage && (
         <div className="w-full bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 mb-6 flex flex-col items-center gap-3 text-center">
           <div className="flex items-center gap-2 text-amber-800 font-bold">
-            <AlertCircle className="w-5 h-5 text-amber-600" />
+            <Volume2 className="w-5 h-5 text-amber-600" />
             <span>Thông báo micro</span>
           </div>
           <p className="text-sm text-amber-700">{errorMessage}</p>
@@ -206,7 +263,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         {recordingState === 'recording' && (
           <div className="absolute inset-0 -m-4 rounded-full bg-rose-400/30 animate-ping pointer-events-none" />
         )}
-        <div
+        <button
+          type="button"
           className={`w-32 h-32 md:w-36 md:h-36 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg ${
             recordingState === 'recording'
               ? 'bg-rose-500 text-white scale-105 shadow-rose-200'
@@ -230,8 +288,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             </div>
           ) : recordingState === 'recorded' ? (
             <div className="flex flex-col items-center">
-              <Volume2 className="w-12 h-12" />
-              <span className="text-xs font-bold mt-1">Đã ghi âm xong</span>
+              <CheckCircle2 className="w-12 h-12" />
+              <span className="text-xs font-bold mt-1">Đã lưu tệp</span>
             </div>
           ) : (
             <div className="flex flex-col items-center">
@@ -239,7 +297,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               <span className="text-xs font-bold mt-1">Bấm để ghi âm</span>
             </div>
           )}
-        </div>
+        </button>
       </div>
 
       {/* Live Duration Counter & Visualizer */}
@@ -250,7 +308,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         <p className="text-xs font-semibold text-slate-500 mt-1">
           {recordingState === 'recording' && '🔴 Đang lắng nghe giọng nói của em...'}
           {recordingState === 'paused' && '⏸️ Bản ghi đang tạm dừng'}
-          {recordingState === 'recorded' && '✅ Em có thể nghe lại trước khi gửi'}
+          {recordingState === 'recorded' && '✅ Bản ghi âm đã sẵn sàng để gửi kèm!'}
           {recordingState === 'idle' && 'Bấm nút tròn phía trên để bắt đầu tâm sự nhé!'}
         </p>
 
@@ -276,12 +334,13 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       {recordingState === 'recorded' && audioUrl && (
         <div className="w-full bg-sky-50 border border-sky-200 rounded-2xl p-4 mb-6 flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-sky-800 flex items-center gap-1">
-              <Volume2 className="w-4 h-4 text-sky-600" /> Bản ghi âm của em ({formatTime(duration)})
+            <span className="text-xs font-bold text-sky-800 flex items-center gap-1.5">
+              <Volume2 className="w-4 h-4 text-sky-600" /> Bản ghi âm: {audioFileName} ({formatTime(duration)})
             </span>
             <button
+              type="button"
               onClick={togglePlayback}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
             >
               {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               {isPlaying ? 'Dừng nghe' : 'Nghe lại'}
@@ -300,25 +359,45 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       {/* Action Buttons Row */}
       <div className="flex flex-wrap items-center justify-center gap-3 w-full">
         {recordingState === 'idle' && (
-          <button
-            onClick={startRecording}
-            className="flex items-center gap-2 px-6 py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 text-base"
-          >
-            <Mic className="w-5 h-5" />
-            Bắt đầu ghi âm
-          </button>
+          <>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleAudioFileSelect}
+              accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg"
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={startRecording}
+              className="flex items-center gap-2 px-6 py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 text-base"
+            >
+              <Mic className="w-5 h-5" />
+              Bắt đầu ghi âm
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl shadow-xs transition-all active:scale-95 text-sm"
+            >
+              <Volume2 className="w-4 h-4 text-sky-600" />
+              Chọn tệp âm thanh có sẵn
+            </button>
+          </>
         )}
 
         {recordingState === 'recording' && (
           <>
             <button
+              type="button"
               onClick={pauseRecording}
-              className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold rounded-2xl shadow-sm transition-all active:scale-95 text-sm"
+              className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold rounded-2xl shadow-xs transition-all active:scale-95 text-sm"
             >
               <Pause className="w-4 h-4" />
               Tạm dừng
             </button>
             <button
+              type="button"
               onClick={stopRecording}
               className="flex items-center gap-2 px-5 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 text-sm"
             >
@@ -331,13 +410,15 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         {recordingState === 'paused' && (
           <>
             <button
+              type="button"
               onClick={resumeRecording}
-              className="flex items-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl shadow-sm transition-all active:scale-95 text-sm"
+              className="flex items-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-2xl shadow-xs transition-all active:scale-95 text-sm"
             >
               <Play className="w-4 h-4" />
               Ghi âm tiếp
             </button>
             <button
+              type="button"
               onClick={stopRecording}
               className="flex items-center gap-2 px-5 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 text-sm"
             >
@@ -348,22 +429,20 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         )}
 
         {recordingState === 'recorded' && (
-          <>
+          <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={resetRecording}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl shadow-sm transition-all active:scale-95 text-sm"
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl shadow-xs transition-all active:scale-95 text-sm"
             >
               <RotateCcw className="w-4 h-4" />
               Ghi âm lại
             </button>
-            <button
-              onClick={handleConfirmAudio}
-              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-md transition-all active:scale-95 text-sm"
-            >
-              <Send className="w-4 h-4" />
-              Gửi lời tâm sự bằng giọng nói
-            </button>
-          </>
+            <div className="px-4 py-2 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              Đã đính kèm tệp âm thanh vào lời chia sẻ!
+            </div>
+          </div>
         )}
       </div>
     </div>

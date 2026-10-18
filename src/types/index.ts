@@ -58,9 +58,26 @@ export interface TeacherNote {
   content: string;
 }
 
+export type MediaFileType = 'none' | 'audio' | 'image' | 'video';
+
+export interface MediaDetails {
+  type: MediaFileType;
+  fileName: string;
+  mimeType: string;
+  fileSize?: number;
+  durationSec?: number;
+  base64Data?: string;
+  blobUrl?: string;
+  driveFileId?: string;
+  driveUrl?: string;
+  driveDownloadUrl?: string;
+  uploadStatus: 'idle' | 'uploading' | 'success' | 'failed';
+  uploadError?: string;
+}
+
 export interface Submission {
   id: string;
-  createdAt: string;
+  createdAt: string; // Valid ISO 8601 string
   studentName: string;
   studentClass: string;
   isAnonymous: boolean;
@@ -68,15 +85,46 @@ export interface Submission {
   topic: TopicType;
   supportLevel: SupportLevel;
   textMessage: string;
+
+  // Audio media
   audioBlobUrl?: string;
   audioBase64?: string;
   audioDuration?: number;
+  audioFileName?: string;
+  audioMimeType?: string;
+  audioFileId?: string;
+  audioDriveUrl?: string;
+
+  // Photo media
   photoUrl?: string;
+  photoBase64?: string;
+  photoFileName?: string;
+  photoMimeType?: string;
+  photoFileId?: string;
+  photoDriveUrl?: string;
+
+  // Video media
+  videoBlobUrl?: string;
+  videoBase64?: string;
+  videoDuration?: number;
+  videoFileName?: string;
+  videoMimeType?: string;
+  videoFileId?: string;
+  videoDriveUrl?: string;
+
+  // Drive profile link
+  driveProfileUrl?: string;
+
   sticker?: string;
   status: CaseStatus;
   teacherNotes: TeacherNote[];
   supportPlan?: string;
+
+  // Sync state
   syncedToGoogle: boolean;
+  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
+  syncError?: string;
+  lastSyncedAt?: string;
   isUrgentAlert?: boolean;
 }
 
@@ -96,4 +144,19 @@ export interface SyncStatus {
   pendingCount: number;
   lastError?: string;
   googleScriptUrl: string;
+}
+
+export interface GasSyncResponse {
+  success: boolean;
+  message?: string;
+  code?: string;
+  audioFileId?: string;
+  audioDriveUrl?: string;
+  photoFileId?: string;
+  photoDriveUrl?: string;
+  videoFileId?: string;
+  videoDriveUrl?: string;
+  hoSoFileId?: string;
+  hoSoDriveUrl?: string;
+  rowNumber?: number;
 }

@@ -1,6 +1,6 @@
 import { EmotionInfo, TopicInfo, SupportLevelInfo, EmotionType } from '../types';
 
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbz3aQzUnstWbk8O_lwIEqng5JPNfcw-80YEx7fqsCD04LoWt_TnkHu1Lc_LQ0SCQDtV/exec';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwyLZT0AU__nWM3OhXCNzQR6uIMTvER3z0Rp3BlkVPhR6JC06uVpMr7SXbcRjVhOy0HcQ/exec';
 
 export const EMOTIONS: Record<EmotionType, EmotionInfo> = {
   happy: {
