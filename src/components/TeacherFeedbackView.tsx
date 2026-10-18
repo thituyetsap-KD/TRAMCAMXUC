@@ -7,8 +7,8 @@ interface TeacherFeedbackViewProps {
 
 export const TeacherFeedbackView: React.FC<TeacherFeedbackViewProps> = ({ onBackToHome }) => {
   const [copied, setCopied] = useState(false);
-  const classkickUrl = 'https://app.classkick.com/login/E4KLJ8';
-  const classCode = 'E4KLJ8';
+  const classkickUrl = 'https://app.classkick.com/login/CVM6B2';
+  const classCode = 'CVM6B2';
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(classCode);
@@ -35,7 +35,7 @@ export const TeacherFeedbackView: React.FC<TeacherFeedbackViewProps> = ({ onBack
       </div>
 
       {/* Prominent Hero Area for Classkick */}
-      <div className="relative bg-gradient-to-br from-emerald-500 via-teal-500 to-sky-600 rounded-3xl p-6 md:p-10 shadow-xl text-white overflow-hidden">
+      <div className="relative bg-gradient-to-br from-emerald-600 via-teal-600 to-sky-700 rounded-3xl p-6 md:p-10 shadow-2xl text-white overflow-hidden border-2 border-emerald-400/40">
         {/* Soft decorative glow circles */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-60 h-60 bg-amber-300/20 rounded-full blur-2xl pointer-events-none" />
@@ -48,39 +48,39 @@ export const TeacherFeedbackView: React.FC<TeacherFeedbackViewProps> = ({ onBack
           </div>
 
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight drop-shadow-sm font-['Quicksand',sans-serif]">
-            Lớp Học Classkick Cùng Thầy Cô
+            Không Gian Phản Hồi Từ Thầy Cô
           </h2>
 
           <p className="text-sm md:text-base text-emerald-50 leading-relaxed font-medium">
-            Thầy cô đã gửi phản hồi, lời động viên và bài tập tương tác sinh động đến các bạn nhỏ. Hãy tham gia ngay để cùng học và nhận hoa điểm mười nhé!
+            Thầy cô đã gửi phản hồi chi tiết, lời động viên chân thành và bài tập tương tác sinh động đến các bạn nhỏ. Hãy tham gia ngay để cùng học và nhận hoa điểm mười nhé!
           </p>
 
           {/* THE PROMINENT REQUIRED CLASSKICK BUTTON */}
-          <div className="pt-2 w-full flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="pt-3 w-full flex flex-col sm:flex-row items-center justify-center gap-3">
             <a
               href={classkickUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-amber-400 hover:bg-amber-300 text-amber-950 font-black text-base md:text-lg rounded-2xl shadow-xl shadow-emerald-950/20 transition-all hover:scale-105 active:scale-95 text-center group cursor-pointer border-2 border-amber-200"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4.5 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-amber-950 font-black text-base md:text-lg rounded-2xl shadow-2xl shadow-emerald-950/30 transition-all hover:scale-105 active:scale-95 text-center group cursor-pointer border-2 border-amber-100 tracking-tight"
             >
-              <BookOpen className="w-5 h-5 text-amber-950" />
-              <span>Tham gia Lớp học Classkick</span>
-              <ExternalLink className="w-5 h-5 text-amber-950 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+              <BookOpen className="w-6 h-6 text-amber-950 shrink-0" />
+              <span className="uppercase font-black tracking-wide">THAM GIA NHẬN PHẢN HỒI TỪ THẦY CÔ</span>
+              <ExternalLink className="w-5 h-5 text-amber-950 shrink-0 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
             </a>
 
             <button
               onClick={handleCopyCode}
               type="button"
-              className="inline-flex items-center gap-2 px-4 py-4 bg-white/20 hover:bg-white/30 text-white font-bold rounded-2xl backdrop-blur-md transition-all text-sm border border-white/30 cursor-pointer"
+              className="inline-flex items-center gap-2 px-5 py-4 bg-white/20 hover:bg-white/30 text-white font-bold rounded-2xl backdrop-blur-md transition-all text-sm border border-white/30 cursor-pointer shadow-sm"
             >
               {copied ? <Check className="w-4 h-4 text-emerald-200" /> : <Copy className="w-4 h-4" />}
-              <span>Mã lớp: <strong>{classCode}</strong></span>
+              <span>Mã lớp: <strong className="font-mono text-base text-amber-200">{classCode}</strong></span>
               {copied && <span className="text-xs text-emerald-200 font-semibold">(Đã chép)</span>}
             </button>
           </div>
 
-          <p className="text-xs text-emerald-100 font-semibold pt-1">
-            * Trang Classkick sẽ mở trong thẻ mới, không làm gián đoạn hay mất dữ liệu đang làm việc của em.
+          <p className="text-xs text-emerald-100/90 font-medium pt-1">
+            * Trang Classkick sẽ mở trong tab mới (<code className="bg-black/20 px-1.5 py-0.5 rounded text-amber-200">target="_blank"</code>), giữ nguyên 100% trạng thái và dữ liệu hiện tại của bạn.
           </p>
         </div>
       </div>

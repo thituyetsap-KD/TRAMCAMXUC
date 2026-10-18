@@ -85,46 +85,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={handleGoFeedback}
               className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl font-black text-sm transition-all text-left border-2 cursor-pointer ${
                 isFeedbackActive
-                  ? 'bg-gradient-to-r from-emerald-100 to-teal-100 text-emerald-950 border-emerald-400 shadow-xs scale-101 ring-2 ring-emerald-300/40'
-                  : 'bg-gradient-to-r from-emerald-50/70 via-teal-50/50 to-white hover:from-emerald-100/70 hover:to-teal-50 text-emerald-900 border-emerald-200 shadow-2xs hover:border-emerald-300'
+                  ? 'bg-gradient-to-r from-emerald-100 via-teal-100 to-sky-100 text-emerald-950 border-emerald-400 shadow-sm scale-101 ring-2 ring-emerald-300/40'
+                  : 'bg-gradient-to-r from-emerald-50/80 via-teal-50/60 to-white hover:from-emerald-100/80 hover:to-teal-50 text-emerald-900 border-emerald-200 shadow-2xs hover:border-emerald-300'
               }`}
             >
               <div className="flex items-center gap-3 truncate">
-                <span className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-xs">
                   <MessageSquareQuote className="w-4 h-4" />
                 </span>
-                <span className="truncate">Phản hồi giáo viên</span>
+                <span className="truncate font-black">Phản hồi của giáo viên</span>
               </div>
-              <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded-md bg-emerald-200 text-emerald-800 shrink-0">
+              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-md bg-emerald-200/90 text-emerald-900 shrink-0 border border-emerald-300 shadow-2xs">
                 Mới
               </span>
             </button>
           </nav>
 
           {/* Khu vực nổi bật Classkick ngay cột bên trái */}
-          <div className="bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600 text-white p-4 rounded-3xl shadow-md border-2 border-emerald-300/60 text-center relative overflow-hidden space-y-2.5">
-            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-white/20 backdrop-blur-xs rounded-full text-[10px] font-black uppercase tracking-wider text-emerald-100">
-              <Sparkles className="w-3 h-3 text-amber-300" /> Lớp học trực tuyến
+          <div className="bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600 text-white p-4 rounded-3xl shadow-lg border-2 border-emerald-300/60 text-center relative overflow-hidden space-y-2.5">
+            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-white/20 backdrop-blur-xs rounded-full text-[10px] font-black uppercase tracking-wider text-emerald-100 border border-white/30">
+              <Sparkles className="w-3 h-3 text-amber-300" /> Phản hồi từ thầy cô
             </div>
 
             <div className="text-xs font-black leading-snug">
-              Nhận phản hồi & bài tập từ thầy cô trên Classkick
+              Nhận phản hồi & bài tập trực tiếp từ thầy cô trên Classkick
             </div>
 
-            {/* Nút bấm Tham gia Lớp học Classkick */}
+            {/* Nút bấm Tham gia nhận phản hồi từ thầy cô */}
             <a
-              href="https://app.classkick.com/login/E4KLJ8"
+              href="https://app.classkick.com/login/CVM6B2"
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 font-black rounded-xl text-xs shadow-md transition-transform hover:scale-103 active:scale-95 group cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-3 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-amber-950 font-black rounded-xl text-xs shadow-md transition-all hover:scale-103 active:scale-95 group cursor-pointer border border-amber-200 tracking-tight"
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Tham gia Lớp học Classkick</span>
-              <ExternalLink className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+              <BookOpen className="w-4 h-4 shrink-0 text-amber-950" />
+              <span className="uppercase text-[11px] leading-tight">THAM GIA NHẬN PHẢN HỒI TỪ THẦY CÔ</span>
+              <ExternalLink className="w-3 h-3 shrink-0 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
             </a>
 
-            <div className="text-[10px] text-emerald-100 font-semibold opacity-90">
-              Mã lớp: <strong>E4KLJ8</strong> · Mở tab mới
+            <div className="text-[10px] text-emerald-100 font-semibold opacity-95">
+              Mã lớp: <strong>CVM6B2</strong> · Mở tab mới
             </div>
           </div>
         </div>
