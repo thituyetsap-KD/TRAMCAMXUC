@@ -98,11 +98,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isTestingGas, setIsTestingGas] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
-  // Statistics calculation
-  const totalCount = submissions.length;
-  const newCount = submissions.filter((s) => s.status === 'new').length;
-  const urgentCount = submissions.filter((s) => s.supportLevel === 'urgent' || s.isUrgentAlert).length;
-  const helpedCount = submissions.filter((s) => s.status === 'helped' || s.status === 'closed').length;
+  // Filter out any demo/sample data and eliminate duplicate submissions
+  const realSubmissions = React.useMemo(() => {
+    const seen = new Set<string>();
+    return (submissions || []).filter((s) => {
+      if (!s || !s.id) return false;
+      if (String(s.id).startsWith('demo-')) return false;
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
+  }, [submissions]);
+
+  // Statistics calculation strictly from real student submissions
+  const totalCount = realSubmissions.length;
+  const newCount = realSubmissions.filter((s) => s.status === 'new').length;
+  const urgentCount = realSubmissions.filter((s) => s.supportLevel === 'urgent' || s.isUrgentAlert).length;
+  const helpedCount = realSubmissions.filter((s) => s.status === 'helped' || s.status === 'closed').length;
 
   // Emotion counts
   const emotionStats: Record<string, number> = {
@@ -113,14 +125,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     speechless: 0,
     just_listen: 0,
   };
-  submissions.forEach((s) => {
+  realSubmissions.forEach((s) => {
     if (emotionStats[s.emotion] !== undefined) {
       emotionStats[s.emotion]++;
     }
   });
 
   // Filtered submissions
-  const filteredList = submissions.filter((item) => {
+  const filteredList = realSubmissions.filter((item) => {
     if (filterUrgentOnly && item.supportLevel !== 'urgent' && !item.isUrgentAlert) return false;
     if (filterEmotion !== 'all' && item.emotion !== filterEmotion) return false;
     if (filterTopic !== 'all' && item.topic !== filterTopic) return false;
@@ -140,7 +152,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     return true;
   });
 
-  const selectedCase = submissions.find((s) => s.id === selectedCaseId) || filteredList[0] || null;
+  const selectedCase = realSubmissions.find((s) => s.id === selectedCaseId) || filteredList[0] || null;
 
   useEffect(() => {
     // Reset audio when case changes
@@ -312,7 +324,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </button>
 
           <button
-            onClick={() => exportSubmissionsToCsv(submissions, false)}
+            onClick={() => exportSubmissionsToCsv(realSubmissions, false)}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-700"
           >
             <Download className="w-4 h-4" />
@@ -413,7 +425,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   filterMediaType === 'all' ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-600'
                 }`}
               >
-                Tất cả ({submissions.length})
+                Tất cả ({realSubmissions.length})
               </button>
               <button
                 type="button"
@@ -487,7 +499,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           {/* Submissions List View */}
           <div className="space-y-2.5 max-h-[620px] overflow-y-auto pr-1">
-            {filteredList.length === 0 ? (
+            {realSubmissions.length === 0 ? (
+              <div className="text-center py-12 px-4 text-slate-400 text-xs font-semibold flex flex-col items-center justify-center gap-2">
+                <Inbox className="w-8 h-8 text-slate-300 stroke-[1.5]" />
+                <span>Chưa có bình luận từ học sinh</span>
+              </div>
+            ) : filteredList.length === 0 ? (
               <div className="text-center py-12 text-slate-400 text-xs">
                 Không tìm thấy lời nhắn nào phù hợp với bộ lọc.
               </div>
@@ -1023,8 +1040,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
             </div>
           ) : (
-            <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center text-slate-400 text-sm">
-              Chọn một lời nhắn ở cột bên trái để xem chi tiết và lắng nghe ghi âm / xem ảnh / video.
+            <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center text-slate-400 text-sm flex flex-col items-center justify-center gap-2">
+              <Inbox className="w-10 h-10 text-slate-300 stroke-[1.5]" />
+              <span className="font-semibold text-slate-600">
+                {realSubmissions.length === 0
+                  ? 'Chưa có bình luận từ học sinh'
+                  : 'Chọn một lời nhắn ở cột bên trái để xem chi tiết và lắng nghe ghi âm / xem ảnh / video.'}
+              </span>
+              {realSubmissions.length === 0 && (
+                <span className="text-xs text-slate-400 max-w-sm">
+                  Các bình luận, lời nhắn, tệp ghi âm, hình ảnh và video do học sinh gửi sẽ hiển thị tại đây ngay khi được gửi thành công.
+                </span>
+              )}
             </div>
           )}
         </div>

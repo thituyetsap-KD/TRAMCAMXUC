@@ -286,102 +286,8 @@ export const normalizeSubmission = (item: any): Submission => {
   };
 };
 
-// Seed realistic initial demo cases
-const INITIAL_SUBMISSIONS: Submission[] = [
-  {
-    id: 'demo-1',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    studentName: 'Học sinh ẩn danh',
-    studentClass: 'Lớp 3A',
-    isAnonymous: true,
-    emotion: 'anxious',
-    topic: 'study',
-    supportLevel: 'urgent',
-    textMessage:
-      'Em thấy lo lắng vì ngày mai thi kiểm tra môn Toán. Mấy hôm nay em ôn bài mà vẫn sợ làm sai. Thầy cô có thể dặn dò giúp em bình tĩnh hơn không ạ?',
-    sticker: 'star',
-    status: 'new',
-    teacherNotes: [
-      {
-        id: 'n-1',
-        date: new Date(Date.now() - 3600000).toISOString(),
-        author: 'Cô Thu Hương (Chủ nhiệm 3A)',
-        content:
-          'Đã nhận tin. Sáng mai đầu giờ sẽ động viên cả lớp và hỏi thăm nhẹ nhàng để em không bị tâm lý.',
-      },
-    ],
-    supportPlan: 'Gặp gỡ 5 phút trước giờ thi, cho làm bài mẫu nhẹ nhàng.',
-    syncedToGoogle: false,
-    syncStatus: 'pending',
-    isUrgentAlert: true,
-  },
-  {
-    id: 'demo-2',
-    createdAt: new Date(Date.now() - 3600000 * 18).toISOString(),
-    studentName: 'Nguyễn Minh Khang',
-    studentClass: 'Lớp 4B',
-    isAnonymous: false,
-    emotion: 'happy',
-    topic: 'joy',
-    supportLevel: 'share_only',
-    textMessage:
-      'Hôm nay nhóm em được cô khen vì cùng nhau chăm sóc bồn hoa của trường! Em và các bạn cảm thấy rất vui và yêu quý ngôi trường này.',
-    sticker: 'sun',
-    status: 'helped',
-    teacherNotes: [
-      {
-        id: 'n-2',
-        date: new Date(Date.now() - 3600000 * 12).toISOString(),
-        author: 'Thầy Tuấn (Tổng phụ trách)',
-        content: 'Niềm vui rất đáng khích lệ, sẽ tuyên dương tập thể lớp vào giờ sinh hoạt.',
-      },
-    ],
-    syncedToGoogle: false,
-    syncStatus: 'pending',
-  },
-  {
-    id: 'demo-3',
-    createdAt: new Date(Date.now() - 3600000 * 28).toISOString(),
-    studentName: 'Học sinh ẩn danh',
-    studentClass: 'Lớp 5C',
-    isAnonymous: true,
-    emotion: 'sad',
-    topic: 'friends',
-    supportLevel: 'chat',
-    textMessage:
-      'Giờ ra chơi các bạn không cho em cùng chơi nhảy dây. Em cảm thấy một mình rất buồn và tủi thân. Em mong cô giúp em hòa đồng cùng các bạn.',
-    sticker: 'cloud',
-    status: 'reviewing',
-    teacherNotes: [],
-    supportPlan: 'Tổ chức trò chơi tập thể gắn kết trong tiết hoạt động trải nghiệm.',
-    syncedToGoogle: false,
-    syncStatus: 'pending',
-  },
-  {
-    id: 'demo-4',
-    createdAt: new Date(Date.now() - 3600000 * 40).toISOString(),
-    studentName: 'Trần Gia Hân',
-    studentClass: 'Lớp 2B',
-    isAnonymous: false,
-    emotion: 'just_listen',
-    topic: 'other',
-    supportLevel: 'share_only',
-    textMessage:
-      'Em chỉ muốn gửi lời cảm ơn cô giáo vì hôm nay đã chỉ cho em cách viết chữ đẹp hơn ạ. Trái tim em thấy ấm áp lắm!',
-    sticker: 'heart',
-    status: 'closed',
-    teacherNotes: [
-      {
-        id: 'n-3',
-        date: new Date(Date.now() - 3600000 * 30).toISOString(),
-        author: 'Cô Mai (Chủ nhiệm 2B)',
-        content: 'Đã gửi lời khen vào sổ liên lạc điện tử cho phụ huynh.',
-      },
-    ],
-    syncedToGoogle: false,
-    syncStatus: 'pending',
-  },
-];
+// No mock or demo submissions - only real submissions from students are stored and calculated
+const INITIAL_SUBMISSIONS: Submission[] = [];
 
 const INITIAL_KIND_MESSAGES: KindMessage[] = [
   {
@@ -410,27 +316,53 @@ export const getSubmissions = (): Submission[] => {
   try {
     const raw = localStorage.getItem(SUBMISSIONS_STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(SUBMISSIONS_STORAGE_KEY, JSON.stringify(INITIAL_SUBMISSIONS));
-      return INITIAL_SUBMISSIONS;
+      return [];
     }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return INITIAL_SUBMISSIONS;
-    return parsed.map(normalizeSubmission);
+    if (!Array.isArray(parsed)) return [];
+
+    // Strictly filter out any demo/sample mock items (e.g. id starting with 'demo-')
+    // and deduplicate by id to ensure real student submissions only
+    const seenIds = new Set<string>();
+    const realSubmissions: Submission[] = [];
+
+    for (const item of parsed) {
+      if (item && item.id && !String(item.id).startsWith('demo-')) {
+        const normalized = normalizeSubmission(item);
+        if (!seenIds.has(normalized.id)) {
+          seenIds.add(normalized.id);
+          realSubmissions.push(normalized);
+        }
+      }
+    }
+
+    return realSubmissions;
   } catch (e) {
     console.error('Error reading submissions from localStorage', e);
-    return INITIAL_SUBMISSIONS;
+    return [];
   }
 };
 
 export const saveSubmissions = (submissions: Submission[]): void => {
   try {
-    const sanitized = submissions.map(normalizeSubmission);
+    // Only save real submissions, eliminating any demo items and duplicate entries
+    const seenIds = new Set<string>();
+    const sanitized: Submission[] = [];
+    for (const s of submissions) {
+      if (s && s.id && !String(s.id).startsWith('demo-')) {
+        const norm = normalizeSubmission(s);
+        if (!seenIds.has(norm.id)) {
+          seenIds.add(norm.id);
+          sanitized.push(norm);
+        }
+      }
+    }
+
     // Strip very heavy base64 strings from localStorage to avoid QuotaExceededError
     // since heavy blobs are stored in IndexedDB and server
     const lightCopy = sanitized.map((s) => {
       const copy = { ...s };
       if (copy.audioBase64 && copy.audioBase64.length > 500000) {
-        // Keep note that audio is in IndexedDB
         copy.audioBlobUrl = copy.audioBlobUrl || copy.audioDriveUrl || `/api/media/${copy.audioFileId}`;
       }
       if (copy.videoBase64 && copy.videoBase64.length > 500000) {
